@@ -68,6 +68,7 @@ typedef struct {
       CLAP_INVALID_NAME,
       CLAP_MISSING_ARGS,
       CLAP_ALREADY_PARSED,
+      CLAP_TOO_MANY_UNNAMED_ARGS,
     } kind;
     const char *arg;
   } error;
@@ -81,8 +82,9 @@ clap_parser clap_parser_init(const int argc, char **argv,
 			     const clap_parser_opts opts);
 
 void clap_arg_add(clap_parser *p, clap_arg arg);
-
+void clap_print_err(clap_parser p);
 void clap_print_help(clap_parser p);
+const char *clap_get(clap_parser p, const char *arg_name);
 
 #endif // CLAP_H_
 #ifndef CLAP_NO_IMPLEMENTATION
@@ -160,10 +162,16 @@ bool clap_parse(clap_parser *p) {
   p->results.count = p->arguments.count;
   p->results.names = malloc(p->results.count * sizeof(const char*));
   p->results.values = malloc(p->results.count * sizeof(const char*));
+  p->unnamed_results.values = malloc(p->results.count * sizeof(const char*));
   // copy args names into results names
+  size_t unnamed_cnt = 0;
   for (size_t i = 0; i < p->results.count; ++i) {
-    p->results.names[i] = p->arguments.args[i].name;
-    p->results.values[i] = p->arguments.args[i].default_value;
+    if (!(p->arguments.args[i].options & CLAP_ARG_UNNAMED)) {
+      p->results.names[i] = p->arguments.args[i].name;
+      p->results.values[i] = p->arguments.args[i].default_value;
+    } else {
+      unnamed_cnt++;
+    }
   }
   // parse
   size_t i = 1;
@@ -255,6 +263,14 @@ bool clap_parse(clap_parser *p) {
       continue;
     }
     // is an unnamed argument
+    if (p->unnamed_results.count >= unnamed_cnt) {
+      p->error.kind = CLAP_TOO_MANY_UNNAMED_ARGS;
+      p->error.arg = arg;
+      return false;
+    }
+    p->unnamed_results.values[p->unnamed_results.count] = arg;
+    p->unnamed_results.count++;
+    i++;
   }
   // check for any missed arguments, return the first one
   for (size_t i = 0; i < p->arguments.count; ++i) {
@@ -273,11 +289,16 @@ void clap_print_err(clap_parser p) {
   case CLAP_NO_VALUE: { printf("ERROR: No value provided at %s\n", p.error.arg); break; }
   case CLAP_INVALID_NAME: { printf("ERROR: Invalid name at %s\n", p.error.arg); break; }
   case CLAP_MISSING_ARGS: {
-   printf("ERROR: Arg(s) Missing, including `%s`\n", p.error.arg);
+    printf("ERROR: Arg(s) Missing, including `%s`\n", p.error.arg);
+    break;
+  }
+  case CLAP_TOO_MANY_UNNAMED_ARGS: {
+    printf("ERROR: Too many unnamed args at `%s`\n", p.error.arg);
     break;
   }
   default: break;
   }
+  clap_print_help(p);
 }
 
 void clap_print_help(clap_parser p) {
@@ -307,6 +328,8 @@ void clap_destroy(clap_parser *p) {
   p->results.count = 0;
   free(p->results.names);
   free(p->results.values);
+  p->unnamed_results.count = 0;
+  free(p->unnamed_results.values);
 }
 
 #endif
