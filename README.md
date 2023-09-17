@@ -12,5 +12,10 @@ If you want to exclude the implementation, you should define the macro:
 #define CLAP_NO_IMPLEMENTATION
 ```
 
-
-Example coming soon...
+An example can be found in `clap_example.c`. To run, simply compile with any standard C compiler, then run. For example:
+``` shell
+$ cc -o clap_example clap_example.c
+$ ./clap_example --dimensions 1280x720 -f png
+Outputting image with dimensions: 1280x720
+And format: png
+```
