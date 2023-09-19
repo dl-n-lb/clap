@@ -85,9 +85,14 @@ clap_parser clap_parser_init(const int argc, char **argv,
 			     const clap_parser_opts opts);
 
 void clap_arg_add(clap_parser *p, clap_arg arg);
+int clap_find_arg_with_name(const clap_parser *p, const char *name);
+int clap_find_arg_with_alias(const clap_parser *p, const char alias);
+bool clap_parse(clap_parser *p);
 void clap_print_err(clap_parser p);
 void clap_print_help(clap_parser p);
 const char *clap_get(clap_parser p, const char *arg_name);
+const char *clap_get_unnamed(clap_parser p, const size_t idx);
+void clap_destroy(clap_parser *p);
 
 #endif // CLAP_H_
 #ifndef CLAP_NO_IMPLEMENTATION
@@ -117,7 +122,7 @@ void clap_arg_add(clap_parser *p, clap_arg arg) {
   p->arguments.args[p->arguments.count++] = arg;
 }
 
-int clap_find_arg_with_name(clap_parser *p, const char *name) {
+int clap_find_arg_with_name(const clap_parser *p, const char *name) {
   for (size_t i = 0; i < p->arguments.count; ++i) {
     clap_arg arg = p->arguments.args[i];
     if (arg.options & CLAP_ARG_UNNAMED) { continue; }
@@ -129,7 +134,7 @@ int clap_find_arg_with_name(clap_parser *p, const char *name) {
   return -1;
 }
 
-int clap_find_arg_with_alias(clap_parser *p, const char alias) {
+int clap_find_arg_with_alias(const clap_parser *p, const char alias) {
   for (size_t i = 0; i < p->arguments.count; ++i) {
     clap_arg arg = p->arguments.args[i];
     if (arg.alias == alias) {
@@ -143,6 +148,7 @@ int clap_find_arg_with_alias(clap_parser *p, const char alias) {
 // set the first instance of delim to \0
 // and then return the next index
 // use with null terminated string ONLY
+// internal
 size_t clap_split_str_on_delim(char *str, char delim) {
   size_t i = 0;
   while (str[i] != '\0') {
