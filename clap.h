@@ -31,10 +31,10 @@ typedef struct {
   const char *description;
   const char *default_value; // only useful if its an optional argument
   enum {
-    CLAP_ARG_OPTIONAL = 1 << 0, // optional argument, otherwise it will be treated as required
-    CLAP_ARG_HIDDEN   = 1 << 1, // hide from help (why would you want to do this?)
-    CLAP_ARG_FLAG     = 1 << 2, // boolean value, set by --flag or -f
-    CLAP_ARG_UNNAMED  = 1 << 3, // be parsed in order separately from all named flags
+    CLAP_ARG_OPTIONAL  = 1 << 0, // optional argument, default is required
+    CLAP_ARG_HIDDEN    = 1 << 1, // hide from help (why would you want to do this?)
+    CLAP_ARG_FLAG      = 1 << 2, // boolean value, set by --flag or -f
+    CLAP_ARG_UNNAMED   = 1 << 3, // be parsed in order separately from all named flags
   } options;
 } clap_arg;
 
@@ -42,6 +42,8 @@ typedef struct {
   const char *program_name;
   int argc;
   char **argv;
+  
+  const char *program_desc;
 
   struct {
     clap_arg *args;
@@ -69,13 +71,14 @@ typedef struct {
       CLAP_MISSING_ARGS,
       CLAP_ALREADY_PARSED,
       CLAP_TOO_MANY_UNNAMED_ARGS,
+      CLAP_MISSING_UNNAMED_ARG,
     } kind;
     const char *arg;
   } error;
 } clap_parser;
 
 typedef struct {
-  const char *blank;
+  const char *desc;
 } clap_parser_opts;
 
 clap_parser clap_parser_init(const int argc, char **argv,
@@ -95,6 +98,7 @@ clap_parser clap_parser_init(const int argc, char **argv,
   assert(*argv != NULL && "argv is empty but argc > 0");
   return (clap_parser) {
     .program_name = argv[0],
+    .program_desc = opts.desc,
     .argc = argc,
     .argv = argv,
     .arguments.args = malloc(CLAP_INITIAL_ARGS_CAP * sizeof(clap_arg)),
@@ -116,6 +120,7 @@ void clap_arg_add(clap_parser *p, clap_arg arg) {
 int clap_find_arg_with_name(clap_parser *p, const char *name) {
   for (size_t i = 0; i < p->arguments.count; ++i) {
     clap_arg arg = p->arguments.args[i];
+    if (arg.options & CLAP_ARG_UNNAMED) { continue; }
     if (strcmp(arg.name, name) == 0) {
       return i;
     }
@@ -164,18 +169,19 @@ bool clap_parse(clap_parser *p) {
   p->results.values = malloc(p->results.count * sizeof(const char*));
   p->unnamed_results.values = malloc(p->results.count * sizeof(const char*));
   // copy args names into results names
-  size_t unnamed_cnt = 0;
+  size_t unnamed_cnt = 0, req_unnamed_cnt = 0;
   for (size_t i = 0; i < p->results.count; ++i) {
     if (!(p->arguments.args[i].options & CLAP_ARG_UNNAMED)) {
       p->results.names[i] = p->arguments.args[i].name;
       p->results.values[i] = p->arguments.args[i].default_value;
     } else {
       unnamed_cnt++;
+      req_unnamed_cnt += !(p->arguments.args[i].options & CLAP_ARG_OPTIONAL);
     }
   }
   // parse
   size_t i = 1;
-  while (i < p->argc) {
+  while ((int)i < p->argc) {
     const char *arg = p->argv[i];
     const size_t arglen = strlen(arg);
     // is a long name
@@ -199,7 +205,7 @@ bool clap_parse(clap_parser *p) {
       }
       // full names could be separated by space or =
       if (split_idx >= strlen(name)) {
-	if (i + 1 >= p->argc) {
+	if ((int)i + 1 >= p->argc) {
 	  p->error.kind = CLAP_NO_VALUE;
 	  p->error.arg = name;
 	  return false;
@@ -253,7 +259,7 @@ bool clap_parse(clap_parser *p) {
 	continue;
       }
       // not a flag
-      if (i + 1 >= p->argc) {
+      if ((int)i + 1 >= p->argc) {
 	p->error.kind = CLAP_NO_VALUE;
 	p->error.arg = &arg[1]; // a will die so cant give ptr to it
 	return false;
@@ -272,8 +278,17 @@ bool clap_parse(clap_parser *p) {
     p->unnamed_results.count++;
     i++;
   }
+  
+  if (p->unnamed_results.count < req_unnamed_cnt) {
+    p->error.kind = CLAP_MISSING_UNNAMED_ARG;
+    return false;
+  }
+  
   // check for any missed arguments, return the first one
   for (size_t i = 0; i < p->arguments.count; ++i) {
+    if (p->arguments.args[i].options && CLAP_ARG_UNNAMED) {
+      continue;
+    }
     if (!p->results.values[i] && !(p->arguments.args[i].options & CLAP_ARG_OPTIONAL)) {
       p->error.kind = CLAP_MISSING_ARGS;
       p->error.arg = p->results.names[i];
@@ -292,21 +307,34 @@ void clap_print_err(clap_parser p) {
     printf("ERROR: Arg(s) Missing, including `%s`\n", p.error.arg);
     break;
   }
+  case CLAP_ALREADY_PARSED: {
+    printf("ERROR: Parser called twice on the same inputs. \
+	   Parsing is destructive.\n");
+    break;
+  }
+  case CLAP_MISSING_UNNAMED_ARG: {
+    printf("ERROR: Missing at least one required unnamed arg\n");
+    break;
+  }
   case CLAP_TOO_MANY_UNNAMED_ARGS: {
     printf("ERROR: Too many unnamed args at `%s`\n", p.error.arg);
     break;
   }
-  default: break;
+  case CLAP_NO_ERR: break;
+  default: assert(false && "Unreachable");
   }
   clap_print_help(p);
 }
 
 void clap_print_help(clap_parser p) {
+  if (p.program_desc) { printf("%s: %s\n", p.program_name, p.program_desc); }
   printf("Usage: %s <args>\n", p.program_name);
   for (size_t i = 0; i < p.arguments.count; ++i) {
     clap_arg arg = p.arguments.args[i];
-    if (!(arg.options & CLAP_ARG_HIDDEN)) { 
-      if (arg.name && arg.alias && arg.description) {
+    if (!(arg.options & CLAP_ARG_HIDDEN)) {
+      if (arg.options & CLAP_ARG_UNNAMED) {
+	printf("<unnamed>: %s\n", arg.description);
+      } else if (arg.name && arg.alias && arg.description) {
 	printf("%s (%c): %s\n", arg.name, arg.alias, arg.description);
       }
     }
@@ -320,6 +348,12 @@ const char *clap_get(clap_parser p, const char *arg_name) {
   }
   return p.results.values[idx];
 }
+
+const char *clap_get_unnamed(clap_parser p, const size_t idx) {
+  if (idx >= p.unnamed_results.count) return NULL;
+  return p.unnamed_results.values[idx];
+}
+
 
 void clap_destroy(clap_parser *p) {
   p->arguments.count = 0;
