@@ -6,7 +6,7 @@ int main(int argc, char **argv) {
       .desc = "An example program to demonstrate some features of the library"
     });
   
-  clap_arg_add(&parser, (clap_arg) {
+  clap_arg_add(&parser, (clap_arg) {b
       .description = "In file path",
       .options = CLAP_ARG_UNNAMED,
     });
